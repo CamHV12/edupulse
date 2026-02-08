@@ -31,6 +31,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [activeTab, setActiveTab] = useState<ManagementTab>('ROSTER');
   const [editingItem, setEditingItem] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [detailResult, setDetailResult] = useState<any>(null);
 
   // Helper trích xuất số khối từ chuỗi lớp (VD: "12A1" -> 12)
   const extractGradeNumber = (str: string) => {
@@ -169,6 +170,13 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
+  const handleViewDetail = (item: any) => {
+    const result = results.find(r => r.name === item.name && r.lessonName === item.lessonName);
+    if (result) {
+      setDetailResult({ ...result, studentName: item.name, lessonName: item.lessonName, score: item.score });
+    }
+  };
+
   const SidebarItem = ({ id, label, icon }: { id: ManagementTab, label: string, icon: string }) => (
     <button 
       onClick={() => { setActiveTab(id); setEditingItem(null); }}
@@ -203,7 +211,6 @@ const Dashboard: React.FC<DashboardProps> = ({
             <p className="px-8 text-[10px] font-black text-gray-300 uppercase mt-6 mb-2 tracking-widest">Hệ thống</p>
             <SidebarItem id="USERS" label="Người dùng" icon="fa-users-cog" />
           </div>
-          <div className="p-6 border-t"><button onClick={onLogout} className="w-full py-3 bg-red-50 text-red-600 rounded-xl font-bold text-xs"><i className="fas fa-power-off mr-2"></i> ĐĂNG XUẤT</button></div>
         </aside>
       )}
 
@@ -211,9 +218,17 @@ const Dashboard: React.FC<DashboardProps> = ({
       <div className="flex-1 flex flex-col min-w-0">
         <nav className="bg-white/80 backdrop-blur-md sticky top-0 z-10 px-8 h-20 flex items-center justify-between border-b shadow-sm">
           <h2 className="font-black text-gray-800 uppercase text-sm tracking-widest">{activeTab}</h2>
-          <div className="text-right">
-            <p className="text-sm font-bold text-gray-800">{user.name}</p>
-            <p className="text-[10px] text-gray-400 font-black uppercase">{user.className} • {user.role}</p>
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <p className="text-sm font-bold text-gray-800">{user.name}</p>
+              <p className="text-[10px] text-gray-400 font-black uppercase">{user.className} • {user.role}</p>
+            </div>
+            <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center border-2 border-white shadow-sm">
+              <i className="fas fa-user text-green-600"></i>
+            </div>
+            <button onClick={onLogout} className="text-gray-400 hover:text-red-500 transition-colors p-2" title="Đăng xuất">
+              <i className="fas fa-power-off"></i>
+            </button>
           </div>
         </nav>
 
@@ -251,7 +266,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                   </div>
                   <div className="bg-white rounded-3xl shadow-sm border overflow-hidden">
                     <table className="w-full text-left text-xs">
-                      <thead className="bg-gray-50 border-b"><tr><th className="px-6 py-4">Lớp</th><th className="px-6 py-4">Học sinh</th><th className="px-6 py-4">Bài học</th><th className="px-6 py-4">Điểm</th><th className="px-6 py-4">Trạng thái</th></tr></thead>
+                      <thead className="bg-gray-50 border-b"><tr><th className="px-6 py-4">Lớp</th><th className="px-6 py-4">Học sinh</th><th className="px-6 py-4">Bài học</th><th className="px-6 py-4">Điểm</th><th className="px-6 py-4">Trạng thái</th><th className="px-6 py-4 text-center">Chi tiết</th></tr></thead>
                       <tbody className="divide-y font-bold">
                         {rosterData.map((item, i) => (
                           <tr key={i} className="hover:bg-gray-50 transition-colors">
@@ -260,6 +275,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                             <td className="px-6 py-4 text-gray-500">{item.lessonName}</td>
                             <td className="px-6 py-4">{item.score === -1 ? '--' : item.score.toFixed(1)}</td>
                             <td className="px-6 py-4"><span className={`px-3 py-1 rounded-full text-[10px] ${item.status === 'Pass' ? 'bg-green-100 text-green-700' : item.status === 'Fail' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-400'}`}>{item.status}</span></td>
+                            <td className="px-6 py-4 text-center">{item.score !== -1 ? <button onClick={() => handleViewDetail(item)} className="text-blue-600 hover:text-blue-800 font-bold"><i className="fas fa-eye"></i></button> : <span className="text-gray-300">-</span>}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -391,6 +407,224 @@ const Dashboard: React.FC<DashboardProps> = ({
               <button onClick={() => setEditingItem(null)} className="flex-1 py-4 bg-gray-100 text-gray-500 rounded-2xl font-black uppercase tracking-widest">Hủy</button>
               <button onClick={() => handleSave(activeTab.charAt(0) + activeTab.slice(1).toLowerCase(), editingItem, activeTab === 'QUESTIONS' ? 'stt' : 'Stt')} disabled={isSaving} className="flex-1 py-4 bg-green-600 text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">
                 {isSaving ? 'Đang lưu...' : 'Lưu lại'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Detail Modal for Answer Review */}
+      {detailResult && (
+        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-3xl p-10 overflow-y-auto max-h-[90vh]">
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <h3 className="text-xl font-black mb-2 uppercase">Chi tiết bài làm</h3>
+                <p className="text-sm text-gray-600">{detailResult.studentName} - {detailResult.lessonName}</p>
+              </div>
+              <button onClick={() => setDetailResult(null)} className="text-gray-400 hover:text-gray-600 text-2xl">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-6 grid grid-cols-3 gap-4">
+              <div className="text-center">
+                <p className="text-[10px] font-black text-blue-600 uppercase">Điểm số</p>
+                <p className="text-2xl font-black text-blue-600">{detailResult.score.toFixed(1)}/10</p>
+              </div>
+              <div className="text-center">
+                <p className="text-[10px] font-black text-blue-600 uppercase">Tổng câu</p>
+                <p className="text-2xl font-black text-blue-600">{detailResult.totalQuestions}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-[10px] font-black text-blue-600 uppercase">Thời gian làm bài</p>
+                <p className="text-lg font-black text-blue-600">
+                  {(() => {
+                    const createdDate = detailResult.createdDate;
+                    if (!createdDate) return 'N/A';
+                    
+                    try {
+                      // Parse ISO date string hoặc timestamp
+                      const date = new Date(createdDate);
+                      if (isNaN(date.getTime())) return 'N/A';
+                      
+                      // Format: "DD/MM/YYYY HH:mm:ss"
+                      const day = String(date.getDate()).padStart(2, '0');
+                      const month = String(date.getMonth() + 1).padStart(2, '0');
+                      const year = date.getFullYear();
+                      const hours = String(date.getHours()).padStart(2, '0');
+                      const minutes = String(date.getMinutes()).padStart(2, '0');
+                      const seconds = String(date.getSeconds()).padStart(2, '0');
+                      
+                      return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+                    } catch (e) {
+                      return createdDate;
+                    }
+                  })()}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {(() => {
+                try {
+                  // Parse answers data
+                  let answersData: any = null;
+                  if (typeof detailResult.answers === 'string') {
+                    try {
+                      answersData = JSON.parse(detailResult.answers);
+                    } catch (e) {
+                      console.error('Error parsing answers JSON:', detailResult.answers, e);
+                      return <div className="text-center text-red-400 py-8">Lỗi: Không thể đọc dữ liệu câu trả lời</div>;
+                    }
+                  } else {
+                    answersData = detailResult.answers;
+                  }
+
+                  if (!answersData) {
+                    return <div className="text-center text-gray-400 py-8">Không có dữ liệu câu trả lời</div>;
+                  }
+
+                  // Map answers - hỗ trợ nhiều format khác nhau
+                  const answersMap: Map<number, string> = new Map();
+                  
+                  if (Array.isArray(answersData)) {
+                    // Format: [{questionId: 1, answer: "A"}, ...]
+                    answersData.forEach((item: any, index: number) => {
+                      let qId = item.questionId;
+                      let answer = item.answer || item.studentAnswer || '';
+                      
+                      // Nếu không có questionId, dùng index hoặc stt
+                      if (!qId && item.stt) qId = item.stt;
+                      if (!qId) qId = index + 1;
+                      
+                      if (answer) {
+                        answersMap.set(qId, answer);
+                      }
+                    });
+                  } else if (typeof answersData === 'object') {
+                    // Format: {1: "A", 2: "B"} hoặc {1: {answer: "A"}, ...}
+                    Object.entries(answersData).forEach(([key, value]: [string, any]) => {
+                      const qId = parseInt(key);
+                      let answer = '';
+                      
+                      if (typeof value === 'string') {
+                        answer = value;
+                      } else if (typeof value === 'object') {
+                        answer = value.answer || value.studentAnswer || '';
+                      }
+                      
+                      if (answer) {
+                        answersMap.set(qId, answer);
+                      }
+                    });
+                  }
+
+                  // Lấy tất cả question IDs từ answers
+                  const questionIds = Array.from(answersMap.keys());
+                  if (questionIds.length === 0) {
+                    return <div className="text-center text-gray-400 py-8">Học sinh chưa làm câu hỏi nào</div>;
+                  }
+
+                  // Lấy questions từ database
+                  const displayedQuestions = questionIds
+                    .map(id => questions.find(q => q.stt === id))
+                    .filter((q): q is typeof questions[0] => q !== undefined)
+                    .sort((a, b) => a.stt - b.stt);
+
+                  if (displayedQuestions.length === 0) {
+                    return <div className="text-center text-gray-400 py-8">Không tìm thấy thông tin câu hỏi</div>;
+                  }
+
+                  // Hiển thị tất cả câu hỏi
+                  return displayedQuestions.map((question, idx) => {
+                    const studentAnswer = answersMap.get(question.stt) || '';
+                    const correctAnswer = question.answerKey || '';
+                    const isCorrect = studentAnswer.toUpperCase().trim() === correctAnswer.toUpperCase().trim();
+                    const isAnswered = studentAnswer.length > 0;
+
+                    return (
+                      <div key={question.stt} className="bg-white border rounded-2xl p-4 space-y-3">
+                        <div className="flex justify-between items-start gap-4">
+                          <div className="flex-1">
+                            <p className="text-[10px] font-black text-gray-400 uppercase mb-2">Câu {idx + 1}</p>
+                            <p className="font-bold text-gray-800 mb-3">{question.text || 'Không xác định'}</p>
+                            
+                            {question.type === 'CHOOSE_ONE' || question.type === 'TRUE_FALSE' ? (
+                              <div className="grid grid-cols-2 gap-2 mb-3">
+                                {(question.type === 'TRUE_FALSE' ? ['Đúng', 'Sai'] : ['A', 'B', 'C', 'D']).map(option => {
+                                  const optionKey = question.type === 'TRUE_FALSE' ? (option === 'Đúng' ? 'optionA' : 'optionB') : `option${option}` as keyof typeof question;
+                                  const optionText = question.type === 'TRUE_FALSE' ? option : question?.[optionKey];
+                                  const optionChar = question.type === 'TRUE_FALSE' ? option.charAt(0) : option;
+                                  const isSelected = studentAnswer.toUpperCase().includes(optionChar.toUpperCase());
+                                  return (
+                                    <div key={option} className={`p-2 rounded-lg border-2 text-xs font-bold ${isSelected ? 'bg-blue-100 border-blue-400' : 'bg-gray-50 border-gray-200'}`}>
+                                      <span className="font-black">{optionChar}.</span> {optionText}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : question.type === 'CHOOSE_MULTIPLE' ? (
+                              <div className="grid grid-cols-2 gap-2 mb-3">
+                                {['A', 'B', 'C', 'D'].map(option => {
+                                  const optionKey = `option${option}` as keyof typeof question;
+                                  const optionText = question?.[optionKey];
+                                  const isSelected = studentAnswer.toUpperCase().includes(option);
+                                  return (
+                                    <div key={option} className={`p-2 rounded-lg border-2 text-xs font-bold ${isSelected ? 'bg-blue-100 border-blue-400' : 'bg-gray-50 border-gray-200'}`}>
+                                      <span className="font-black">{option}.</span> {optionText}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : question.type === 'SHORT_ANSWER' ? (
+                              <div className="bg-blue-50 border border-blue-200 p-2 rounded-lg text-xs italic">
+                                {studentAnswer || '--'}
+                              </div>
+                            ) : null}
+                          </div>
+                          {isAnswered && (
+                            <div className={`px-4 py-2 rounded-lg text-xs font-black whitespace-nowrap ${isCorrect ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                              {isCorrect ? '✓ Đúng' : '✗ Sai'}
+                            </div>
+                          )}
+                          {!isAnswered && (
+                            <div className="px-4 py-2 rounded-lg text-xs font-black whitespace-nowrap bg-gray-100 text-gray-500">
+                              Chưa trả lời
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 pt-3 border-t text-xs">
+                          <div>
+                            <p className="font-black text-gray-500 uppercase mb-1">Bạn chọn:</p>
+                            <p className="font-bold text-blue-600">{studentAnswer || '--'}</p>
+                          </div>
+                          <div>
+                            <p className="font-black text-gray-500 uppercase mb-1">Đáp án đúng:</p>
+                            <p className="font-bold text-green-600">{correctAnswer}</p>
+                          </div>
+                        </div>
+
+                        {question.solution && (
+                          <div className="bg-amber-50 border-l-4 border-amber-400 p-3 rounded text-xs">
+                            <p className="font-black text-amber-700 uppercase mb-1">Giải thích:</p>
+                            <p className="text-amber-900">{question.solution}</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                } catch (e) {
+                  console.error('Error rendering questions:', e);
+                  return <div className="text-center text-red-400 py-8">Lỗi khi hiển thị chi tiết câu hỏi: {String(e)}</div>;
+                }
+              })()}
+            </div>
+
+            <div className="mt-6">
+              <button onClick={() => setDetailResult(null)} className="w-full py-4 bg-gray-100 text-gray-600 rounded-2xl font-black uppercase tracking-widest hover:bg-gray-200 transition-all">
+                Đóng
               </button>
             </div>
           </div>
