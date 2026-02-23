@@ -150,6 +150,13 @@ function doPost(e) {
       return jsonResponse({ success: true });
     }
 
+    if (action === 'formatQuestions') {
+      const sheet = ss.getSheetByName(SHEETS.QUESTIONS);
+      const data = getSheetData(sheet);
+      const formatted = data.map((item, idx) => ({ id: item.Id || item.ID || idx + 1, html: buildQuestionHtml(item, idx + 1) }));
+      return jsonResponse({ success: true, formattedQuestions: formatted });
+    }
+
     if (action === 'logout') {
       const { name } = postData;
       const sheet = ss.getSheetByName(SHEETS.USERS);
@@ -185,3 +192,86 @@ function getSheetData(sheet) {
 function jsonResponse(data) {
   return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
 }
+
+/**
+ * Format questions from the Questions sheet into HTML-friendly markup.
+ * Replaces common inline math notations like a^2, b^2, sqrt(...) into HTML (sup, √).
+ * Exposed via doPost action: { action: 'formatQuestions' }
+ */
+function formatMathInText(text) {
+  if (!text && text !== 0) return '';
+  let s = String(text);
+  // Escape HTML first
+  s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // Replace \^ with <sup>...</sup>
+  // handles x^2, b^2, x^{12}
+  s = s.replace(/\^\{([^}]+)\}/g, function(_, cap) { return '<sup>' + cap + '</sup>'; });
+  s = s.replace(/([A-Za-z0-9\)\]])\^(\d+)/g, function(_, base, exp) { return base + '<sup>' + exp + '</sup>'; });
+
+  // Replace sqrt(...) or \sqrt(...) with a square root symbol
+  s = s.replace(/\\?sqrt\s*\(([^)]+)\)/gi, function(_, inside) { return '√(' + inside + ')'; });
+
+  // Replace common Delta text like Delta or \Delta with the Δ symbol
+  s = s.replace(/\\?Delta\b/gi, 'Δ');
+
+  // Replace != or <> with ≠
+  s = s.replace(/(!=)|(<>)/g, '≠');
+
+  // tidy: collapse multiple spaces
+  s = s.replace(/\s+/g, ' ');
+  return s;
+}
+
+function buildQuestionHtml(item, qIndex) {
+  // Detect question text field name (common headers)
+  const questionKeys = ['Question', 'question', 'Q', 'q', 'Stem', 'Content'];
+  let questionText = '';
+  for (const k of questionKeys) if (item[k]) { questionText = item[k]; break; }
+  if (!questionText) {
+    // fallback: try to find any header that contains 'question'
+    for (const k in item) if (/question/i.test(k) && item[k]) { questionText = item[k]; break; }
+  }
+
+  const formattedQuestion = formatMathInText(questionText);
+
+  // Find option columns (A/B/C/D) flexibly
+  const optionCols = [];
+  for (const k in item) {
+    if (/^\s*(A|B|C|D)\b/i.test(k) || /option\s*A|option\s*B|option\s*C|option\s*D/i.test(k) || /^opt[a-d]$/i.test(k)) {
+      optionCols.push({ key: k, label: k.trim() });
+    }
+  }
+  // fallback: look for columns that start with Option
+  if (optionCols.length === 0) {
+    for (const k in item) if (/option/i.test(k)) optionCols.push({ key: k, label: k.trim() });
+  }
+  // if still none, try common names
+  if (optionCols.length === 0) {
+    ['A','B','C','D'].forEach(letter => { if (item[letter]) optionCols.push({ key: letter, label: letter }); });
+  }
+
+  // Build options HTML
+  let optionsHtml = '';
+  if (optionCols.length > 0) {
+    optionsHtml += '<div class="options">';
+    const labels = ['A','B','C','D'];
+    for (let i = 0; i < optionCols.length; i++) {
+      const col = optionCols[i];
+      const optText = formatMathInText(item[col.key] || '');
+      const labelLetter = labels[i] || String.fromCharCode(65 + i);
+      optionsHtml += '<label style="display:block;margin:8px 0;cursor:pointer">';
+      optionsHtml += '<input type="radio" name="q' + qIndex + '" style="margin-right:8px">';
+      optionsHtml += '<strong>' + labelLetter + '.</strong>&nbsp; ' + optText;
+      optionsHtml += '</label>';
+    }
+    optionsHtml += '</div>';
+  }
+
+  const html = '<div class="question">' +
+               '<div class="stem" style="margin-bottom:8px">' + formattedQuestion + '</div>' +
+               optionsHtml +
+               '</div>';
+  return html;
+}
+

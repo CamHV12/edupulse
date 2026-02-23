@@ -1,6 +1,54 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
 import { Lesson, Question } from '../types';
+
+// Render mixed content containing plain text and LaTeX segments.
+// Supports inline `$...$`, display `$$...$$`, `\(...\)` and `\[...\]`.
+function RenderLatex({ content }: { content?: string | null }) {
+  if (!content) return <span />;
+  const s = String(content);
+
+  // If the content already contains HTML tags and no LaTeX delimiters, render as-is.
+  if (s.includes('<') && !s.includes('$') && !s.includes('\\(') && !s.includes('\\[')) {
+    return <span dangerouslySetInnerHTML={{ __html: s }} />;
+  }
+
+  const escapeHtml = (raw: string) => raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+
+  const parts = s.split(/(\$\$[\s\S]+?\$\$|\$[\s\S]+?\$|\\\\\([\s\S]+?\\\\\)|\\\\\[[\s\S]+?\\\\\])/g);
+  const html = parts.map((part) => {
+    if (!part) return '';
+    // $$...$$
+    if (/^\$\$[\s\S]+\$\$$/.test(part)) {
+      const inner = part.slice(2, -2);
+      try { return katex.renderToString(inner, { throwOnError: false, displayMode: true }); } catch { return escapeHtml(part); }
+    }
+    // $...$
+    if (/^\$[\s\S]+\$$/.test(part)) {
+      const inner = part.slice(1, -1);
+      try { return katex.renderToString(inner, { throwOnError: false, displayMode: false }); } catch { return escapeHtml(part); }
+    }
+    // \(...\)
+    if (/^\\\\\([\s\S]+\\\\\)$/.test(part)) {
+      const inner = part.slice(2, -2);
+      try { return katex.renderToString(inner, { throwOnError: false, displayMode: false }); } catch { return escapeHtml(part); }
+    }
+    // \[...\]
+    if (/^\\\\\[[\s\S]+\\\\\]$/.test(part)) {
+      const inner = part.slice(2, -2);
+      try { return katex.renderToString(inner, { throwOnError: false, displayMode: true }); } catch { return escapeHtml(part); }
+    }
+    return escapeHtml(part);
+  }).join('');
+
+  return <span dangerouslySetInnerHTML={{ __html: html }} />;
+}
 
 interface QuizProps {
   lesson: Lesson;
@@ -217,7 +265,7 @@ const Quiz: React.FC<QuizProps> = ({ lesson, questions, onFinish, onCancel }) =>
             </div>
             
             <h2 className="text-xl md:text-2xl font-semibold text-gray-800 leading-relaxed mb-6">
-              {currentQuestion.text}
+              <RenderLatex content={currentQuestion.text} />
             </h2>
 
             {currentQuestion.imageId && (
@@ -270,7 +318,7 @@ const Quiz: React.FC<QuizProps> = ({ lesson, questions, onFinish, onCancel }) =>
                             />
                           ) : (
                             <span className={`font-medium w-full ${selected ? 'text-green-800' : 'text-gray-700'}`}>
-                              {opt.text}
+                              <RenderLatex content={opt.text} />
                             </span>
                           )}
                         </div>

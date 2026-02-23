@@ -1,5 +1,5 @@
 
-const API_URL = 'https://script.google.com/macros/s/AKfycbyYS2mYTuEi_OsaMeJGS5qIqC6eeE3C87d_TGauLqxySiE6UETjNwcGi-pbsdTksMSzhA/exec'.trim();
+const API_URL = 'https://script.google.com/macros/s/AKfycbzcWFVkqtzRymJCLSN4spZNk22slZgE3J-Bem90QjLS0qCXSKm0etY_lcqa8Sw3vL-hQg/exec'.trim();
 
 const safeString = (val: any): string => {
   if (val === null || val === undefined) return '';
