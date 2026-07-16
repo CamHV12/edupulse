@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Lesson, Question } from '../types';
+import RenderLatex from './RenderLatex';
 
 interface ReviewProps {
   result: {
@@ -203,7 +204,11 @@ const ResultReview: React.FC<ReviewProps> = ({ result, lesson, onBack }) => {
                   </div>
                 );
               }
-              return <span className="block mt-1">{text || '(Trống)'}</span>;
+              return (
+                <span className="block mt-1">
+                  <RenderLatex content={text || '(Trống)'} />
+                </span>
+              );
             };
 
             const getOptionText = (key: string) => {
@@ -230,7 +235,9 @@ const ResultReview: React.FC<ReviewProps> = ({ result, lesson, onBack }) => {
                   </span>
                 </div>
 
-                <p className="text-lg font-semibold text-gray-800 mb-4">{q.text}</p>
+                <h2 className="text-lg font-semibold text-gray-800 mb-4">
+                  <RenderLatex content={q.text} />
+                </h2>
                 
                 {q.imageId && (
                   <div className="mb-6 rounded-2xl border bg-gray-50 p-3 flex justify-center">
@@ -242,10 +249,10 @@ const ResultReview: React.FC<ReviewProps> = ({ result, lesson, onBack }) => {
                   <div className={`p-5 rounded-2xl border ${isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
                     <p className="text-[10px] font-bold uppercase text-gray-400 mb-2">Đáp án của bạn</p>
                     <div className={`font-bold ${isCorrect ? 'text-green-700' : 'text-red-700'}`}>
-                      {userAnswer ? userAnswer.split(',').map(key => {
+                      {userAnswer ? userAnswer.split(',').map((key, i) => {
                         const k = key.trim().toUpperCase();
                         return (
-                          <div key={k} className="mb-3 last:mb-0">
+                          <div key={`${k}-${i}`} className="mb-3 last:mb-0">
                             <span className="text-xs opacity-60 bg-white/50 px-2 py-0.5 rounded">Lựa chọn {k}:</span>
                             {renderAnswerContent(getOptionText(k) || k)}
                           </div>
@@ -257,10 +264,10 @@ const ResultReview: React.FC<ReviewProps> = ({ result, lesson, onBack }) => {
                     <div className="p-5 rounded-2xl bg-blue-50 border border-blue-200">
                       <p className="text-[10px] font-bold uppercase text-gray-400 mb-2">Đáp án đúng</p>
                       <div className="font-bold text-blue-700">
-                        {q.answerKey.split(',').map(key => {
+                        {q.answerKey.split(',').map((key, i) => {
                           const k = key.trim().toUpperCase();
                           return (
-                            <div key={k} className="mb-3 last:mb-0">
+                            <div key={`${k}-${i}`} className="mb-3 last:mb-0">
                               <span className="text-xs opacity-60 bg-white/50 px-2 py-0.5 rounded">Lựa chọn {k}:</span>
                               {renderAnswerContent(getOptionText(k) || k)}
                             </div>
@@ -277,7 +284,9 @@ const ResultReview: React.FC<ReviewProps> = ({ result, lesson, onBack }) => {
                       <i className="fas fa-lightbulb text-slate-400"></i>
                       <p className="text-xs font-bold text-slate-500 uppercase">Giải thích chi tiết</p>
                     </div>
-                    <p className="text-sm text-slate-600 italic leading-relaxed whitespace-pre-line">{q.solution}</p>
+                    <div className="text-sm text-slate-600 italic leading-relaxed whitespace-pre-line">
+                      <RenderLatex content={q.solution} />
+                    </div>
                   </div>
                 )}
               </div>

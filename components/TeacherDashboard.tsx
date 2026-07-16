@@ -1,8 +1,11 @@
 
 import React, { useState, useMemo } from 'react';
+import * as XLSX from 'xlsx';
 import { User, Subject, Lesson, Result, Student, Question, QuestionType } from '../types';
 import { api } from '../services/api';
 import Analytics from './Analytics';
+import RenderLatex from './RenderLatex';
+import { formatTextWithMath } from '../utils/mathFormatter';
 
 interface DashboardProps {
   user: User;
@@ -32,6 +35,14 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [editingItem, setEditingItem] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [detailResult, setDetailResult] = useState<any>(null);
+
+  const [importedLessons, setImportedLessons] = useState<Lesson[]>([]);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+
+  const [importedQuestions, setImportedQuestions] = useState<Question[]>([]);
+  const [showQuestionImportModal, setShowQuestionImportModal] = useState(false);
+  const [isQuestionImporting, setIsQuestionImporting] = useState(false);
 
   // Helper trích xuất số khối từ chuỗi lớp (VD: "12A1" -> 12)
   const extractGradeNumber = (str: string) => {
@@ -124,13 +135,92 @@ const Dashboard: React.FC<DashboardProps> = ({
     });
 
     return data.filter(item => {
-      const matchClass = filterClass === 'ALL' || item.className === filterClass;
+      const isFilterClassGradeOnly = /^\d+$/.test(filterClass);
+      const matchClass = filterClass === 'ALL' || 
+        item.className === filterClass || 
+        (isFilterClassGradeOnly && extractGradeNumber(item.className).toString() === filterClass);
       const matchSubject = filterSub === 'ALL' || item.subjectName === filterSub;
       const matchLesson = filterLes === 'ALL' || item.lessonName === filterLes;
       const matchStatus = filterStat === 'ALL' || item.status === filterStat;
       return matchClass && matchSubject && matchLesson && matchStatus;
     });
   }, [students, subjects, lessons, results, isAdmin, teacherGrade, filterClass, filterSub, filterLes, filterStat]);
+
+  const [sortField, setSortField] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  const sortedRosterData = useMemo(() => {
+    if (!sortField) return rosterData;
+    return [...rosterData].sort((a, b) => {
+      let valA = a[sortField];
+      let valB = b[sortField];
+      
+      // Specially handle score sorting where -1 is considered lower than actual scores
+      if (sortField === 'score') {
+        const numA = Number(valA);
+        const numB = Number(valB);
+        if (numA < numB) return sortDirection === 'asc' ? -1 : 1;
+        if (numA > numB) return sortDirection === 'asc' ? 1 : -1;
+        return 0;
+      }
+
+      if (typeof valA === 'string') valA = valA.toLowerCase();
+      if (typeof valB === 'string') valB = valB.toLowerCase();
+      
+      if (valA === undefined || valA === null) return 1;
+      if (valB === undefined || valB === null) return -1;
+      
+      if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+      if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [rosterData, sortField, sortDirection]);
+
+  const [lessonSortField, setLessonSortField] = useState<string | null>(null);
+  const [lessonSortDirection, setLessonSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  const handleLessonSort = (field: string) => {
+    if (lessonSortField === field) {
+      setLessonSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setLessonSortField(field);
+      setLessonSortDirection('asc');
+    }
+  };
+
+  const sortedLessons = useMemo(() => {
+    if (!lessonSortField) return visibleLessons;
+    return [...visibleLessons].sort((a, b) => {
+      let valA: any = a[lessonSortField as keyof Lesson];
+      let valB: any = b[lessonSortField as keyof Lesson];
+
+      if (lessonSortField === 'subjectId') {
+        const subA = subjects.find(s => s.stt === a.subjectId)?.name || '';
+        const subB = subjects.find(s => s.stt === b.subjectId)?.name || '';
+        valA = subA;
+        valB = subB;
+      }
+
+      if (typeof valA === 'string') valA = valA.toLowerCase();
+      if (typeof valB === 'string') valB = valB.toLowerCase();
+
+      if (valA === undefined || valA === null) return 1;
+      if (valB === undefined || valB === null) return -1;
+
+      if (valA < valB) return lessonSortDirection === 'asc' ? -1 : 1;
+      if (valA > valB) return lessonSortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [visibleLessons, lessonSortField, lessonSortDirection, subjects]);
 
   // --- CRUD ACTIONS ---
 
@@ -174,6 +264,370 @@ const Dashboard: React.FC<DashboardProps> = ({
     const result = results.find(r => r.name === item.name && r.lessonName === item.lessonName);
     if (result) {
       setDetailResult({ ...result, studentName: item.name, lessonName: item.lessonName, score: item.score });
+    }
+  };
+
+  const handleExportExcel = () => {
+    try {
+      const exportData = visibleLessons.map(l => {
+        const subject = subjects.find(s => s.stt === l.subjectId);
+        return {
+          'STT': l.stt,
+          'Tên bài học': l.name,
+          'Tiêu đề': l.title || '',
+          'Môn học': subject ? `${subject.name} - Khối ${subject.grade}` : '',
+          'Mã môn học': l.subjectId,
+          'Thời gian làm bài (phút)': l.timeoutMinutes || 30,
+          'Số câu hỏi': l.count || 10,
+          'Điểm đạt': l.targetScore || 8
+        };
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(exportData);
+      
+      // Auto-fit column widths
+      const maxLens = exportData.reduce((acc: any, row: any) => {
+        Object.keys(row).forEach((key) => {
+          const val = String(row[key] || '');
+          acc[key] = Math.max(acc[key] || 0, val.length, key.length);
+        });
+        return acc;
+      }, {});
+      
+      worksheet['!cols'] = Object.keys(maxLens).map((key) => ({
+        wch: maxLens[key] + 3
+      }));
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Danh sách bài học");
+      
+      XLSX.writeFile(workbook, `Danh_sach_bai_hoc_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } catch (err) {
+      console.error("Lỗi khi xuất file Excel:", err);
+      alert("Xuất file Excel thất bại!");
+    }
+  };
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const bstr = event.target?.result;
+        const workbook = XLSX.read(bstr, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const rawData = XLSX.utils.sheet_to_json<any>(worksheet);
+
+        if (rawData.length === 0) {
+          alert("File Excel trống hoặc không đúng định dạng!");
+          return;
+        }
+
+        const processed: Lesson[] = [];
+        let nextStt = Math.max(...lessons.map(l => l.stt), 0) + 1;
+
+        for (const row of rawData) {
+          const subVal = row['Mã môn học'] || row['Mã môn'] || row['subjectId'] || row['Subject_id'] || row['SubjectId'] || row['Môn học'] || row['Môn'];
+          let finalSubjectId = visibleSubjects[0]?.stt || 1;
+          
+          if (subVal !== undefined && subVal !== null) {
+            const parsedId = parseInt(subVal);
+            if (!isNaN(parsedId)) {
+              finalSubjectId = parsedId;
+            } else {
+              const subStr = String(subVal).toLowerCase().trim();
+              const matchedSub = subjects.find(s => 
+                s.name.toLowerCase().trim() === subStr || 
+                s.name.toLowerCase().includes(subStr) ||
+                subStr.includes(s.name.toLowerCase())
+              );
+              if (matchedSub) {
+                finalSubjectId = matchedSub.stt;
+              }
+            }
+          }
+
+          const sttVal = parseInt(row['STT'] || row['stt'] || row['Stt'] || row['Số thứ tự']);
+          const finalStt = !isNaN(sttVal) ? sttVal : nextStt++;
+
+          const nameVal = row['Tên bài học'] || row['Tên bài'] || row['name'] || row['Name'] || row['Bài học'];
+          if (!nameVal) continue;
+
+          const titleVal = row['Tiêu đề'] || row['Mô tả'] || row['title'] || row['Title'] || '';
+          
+          const timeoutVal = parseInt(row['Thời gian làm bài (phút)'] || row['Thời gian làm bài'] || row['Thời gian'] || row['timeoutMinutes'] || row['Timeout (minute)'] || row['Phút']);
+          const countVal = parseInt(row['Số câu hỏi'] || row['Số câu'] || row['count'] || row['Count']);
+          const scoreVal = parseInt(row['Điểm đạt'] || row['Điểm tối thiểu'] || row['targetScore'] || row['Target score'] || row['Yêu cầu điểm']);
+
+          processed.push({
+            stt: finalStt,
+            subjectId: finalSubjectId,
+            name: String(nameVal).trim(),
+            title: String(titleVal).trim(),
+            timeoutMinutes: !isNaN(timeoutVal) ? timeoutVal : 30,
+            count: !isNaN(countVal) ? countVal : 10,
+            targetScore: !isNaN(scoreVal) ? scoreVal : 8
+          });
+        }
+
+        if (processed.length === 0) {
+          alert("Không tìm thấy dòng bài học hợp lệ nào để import!");
+          return;
+        }
+
+        setImportedLessons(processed);
+        setShowImportModal(true);
+      } catch (err) {
+        console.error("Lỗi khi đọc file Excel:", err);
+        alert("Đọc file Excel thất bại! Hãy chắc chắn file đúng định dạng.");
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = '';
+  };
+
+  const handleConfirmImport = async () => {
+    if (importedLessons.length === 0) return;
+    setIsImporting(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const item of importedLessons) {
+      const payload = {
+        'Stt': item.stt,
+        'Subject_id': item.subjectId,
+        'Name': item.name,
+        'Title': item.title,
+        'Timeout (minute)': item.timeoutMinutes,
+        'Count': item.count,
+        'Target score': item.targetScore
+      };
+      try {
+        await api.saveItem('Lessons', payload, 'Stt');
+        successCount++;
+      } catch (err) {
+        console.error("Lỗi khi import dòng:", item, err);
+        failCount++;
+      }
+    }
+
+    setIsImporting(false);
+    setShowImportModal(false);
+    setImportedLessons([]);
+    
+    if (onRefreshData) {
+      onRefreshData();
+    }
+    
+    if (failCount > 0) {
+      alert(`Import hoàn tất! Thành công: ${successCount} bài học, Thất bại: ${failCount} bài học.`);
+    } else {
+      alert(`Import thành công tất cả ${successCount} bài học!`);
+    }
+  };
+
+  const handleExportQuestionsExcel = () => {
+    try {
+      const exportData = visibleQuestions.map(q => {
+        const lesson = lessons.find(l => l.stt === q.lessonId);
+        return {
+          'STT': q.stt,
+          'Mã bài học': q.lessonId,
+          'Tên bài học': lesson ? lesson.name : '',
+          'Loại câu hỏi': q.type || 'CHOOSE_ONE',
+          'Mức độ': q.level || 'EASY',
+          'Điểm': q.point || 1,
+          'Nội dung câu hỏi': q.text || '',
+          'ID Ảnh': q.imageId || '',
+          'Phương án A': q.optionA || '',
+          'Phương án B': q.optionB || '',
+          'Phương án C': q.optionC || '',
+          'Phương án D': q.optionD || '',
+          'Đáp án': q.answerKey || '',
+          'Giải thích': q.solution || ''
+        };
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(exportData);
+      
+      // Auto-fit column widths
+      const maxLens = exportData.reduce((acc: any, row: any) => {
+        Object.keys(row).forEach((key) => {
+          const val = String(row[key] || '');
+          acc[key] = Math.max(acc[key] || 0, val.length, key.length);
+        });
+        return acc;
+      }, {});
+      
+      worksheet['!cols'] = Object.keys(maxLens).map((key) => ({
+        wch: maxLens[key] + 3
+      }));
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Ngân hàng câu hỏi");
+      
+      XLSX.writeFile(workbook, `Ngan_hang_cau_hoi_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } catch (err) {
+      console.error("Lỗi khi xuất file Excel câu hỏi:", err);
+      alert("Xuất file Excel thất bại!");
+    }
+  };
+
+  const handleImportQuestionsFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const bstr = event.target?.result;
+        const workbook = XLSX.read(bstr, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const rawData = XLSX.utils.sheet_to_json<any>(worksheet);
+
+        if (rawData.length === 0) {
+          alert("File Excel trống hoặc không đúng định dạng!");
+          return;
+        }
+
+        const processed: Question[] = [];
+        let nextStt = Math.max(...questions.map(q => q.stt), 0) + 1;
+
+        for (const row of rawData) {
+          const lessonVal = row['Mã bài học'] || row['Mã bài'] || row['lesson_id'] || row['Lesson ID'] || row['lessonId'] || row['Lesson_id'] || row['Bài học'] || row['Tên bài học'];
+          let finalLessonId = visibleLessons[0]?.stt || 1;
+          
+          if (lessonVal !== undefined && lessonVal !== null) {
+            const parsedId = parseInt(lessonVal);
+            if (!isNaN(parsedId)) {
+              finalLessonId = parsedId;
+            } else {
+              const lesStr = String(lessonVal).toLowerCase().trim();
+              const matchedLes = lessons.find(l => 
+                l.name.toLowerCase().trim() === lesStr || 
+                l.name.toLowerCase().includes(lesStr) ||
+                lesStr.includes(l.name.toLowerCase())
+              );
+              if (matchedLes) {
+                finalLessonId = matchedLes.stt;
+              }
+            }
+          }
+
+          const sttVal = parseInt(row['STT'] || row['stt'] || row['Stt'] || row['Số thứ tự']);
+          const finalStt = !isNaN(sttVal) ? sttVal : nextStt++;
+
+          const textVal = row['Nội dung câu hỏi'] || row['Nội dung'] || row['Câu hỏi'] || row['question_text'] || row['Question Text'] || row['text'] || row['Text'];
+          if (!textVal) continue;
+
+          const typeVal = String(row['Loại câu hỏi'] || row['Loại'] || row['question_type'] || row['Question Type'] || row['type'] || row['Type'] || 'CHOOSE_ONE').toUpperCase().trim();
+          let finalType: QuestionType = 'CHOOSE_ONE';
+          if (typeVal.includes('CHOOSE_MULTIPLE') || typeVal.includes('Nhiều') || typeVal.includes('MULTIPLE')) {
+            finalType = 'CHOOSE_MULTIPLE';
+          } else if (typeVal.includes('TRUE_FALSE') || typeVal.includes('Đúng') || typeVal.includes('Sai')) {
+            finalType = 'TRUE_FALSE';
+          } else if (typeVal.includes('SHORT_ANSWER') || typeVal.includes('Tự luận') || typeVal.includes('Điền')) {
+            finalType = 'SHORT_ANSWER';
+          }
+
+          const levelVal = String(row['Mức độ'] || row['Cấp độ'] || row['quiz_level'] || row['level'] || '').trim().toUpperCase();
+          let finalLevel = 'EASY';
+          if (levelVal === 'EASY' || levelVal === 'MEDIUM' || levelVal === 'HARD') {
+            finalLevel = levelVal;
+          }
+
+          const pointVal = parseFloat(row['Điểm'] || row['point'] || row['Point'] || row['Số điểm']);
+          const finalPoint = !isNaN(pointVal) ? pointVal : 1;
+
+          const imageIdVal = row['ID Ảnh'] || row['Mã ảnh'] || row['image_id'] || row['Image ID'] || row['imageId'] || '';
+          const optAVal = row['Phương án A'] || row['Đáp án A'] || row['Option A'] || row['option_A'] || row['optionA'] || '';
+          const optBVal = row['Phương án B'] || row['Đáp án B'] || row['Option B'] || row['option_B'] || row['optionB'] || '';
+          const optCVal = row['Phương án C'] || row['Đáp án C'] || row['Option C'] || row['option_C'] || row['optionC'] || '';
+          const optDVal = row['Phương án D'] || row['Đáp án D'] || row['Option D'] || row['option_D'] || row['optionD'] || '';
+
+          const answerVal = String(row['Đáp án'] || row['Đáp án đúng'] || row['answer_key'] || row['Answer Key'] || row['answerKey'] || '').trim();
+          const solutionVal = row['Giải thích'] || row['Lời giải'] || row['solution'] || row['Explanation'] || '';
+
+          processed.push({
+            stt: finalStt,
+            lessonId: finalLessonId,
+            type: finalType,
+            level: finalLevel,
+            point: finalPoint,
+            text: String(textVal).trim(),
+            imageId: imageIdVal ? String(imageIdVal).trim() : undefined,
+            optionA: optAVal ? String(optAVal).trim() : undefined,
+            optionB: optBVal ? String(optBVal).trim() : undefined,
+            optionC: optCVal ? String(optCVal).trim() : undefined,
+            optionD: optDVal ? String(optDVal).trim() : undefined,
+            answerKey: answerVal,
+            solution: String(solutionVal).trim()
+          });
+        }
+
+        if (processed.length === 0) {
+          alert("Không tìm thấy câu hỏi hợp lệ nào để import!");
+          return;
+        }
+
+        setImportedQuestions(processed);
+        setShowQuestionImportModal(true);
+      } catch (err) {
+        console.error("Lỗi khi đọc file Excel câu hỏi:", err);
+        alert("Đọc file Excel thất bại! Hãy chắc chắn file đúng định dạng.");
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = '';
+  };
+
+  const handleConfirmQuestionsImport = async () => {
+    if (importedQuestions.length === 0) return;
+    setIsQuestionImporting(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const item of importedQuestions) {
+      const payload = {
+        'stt': item.stt,
+        'lesson_id': item.lessonId,
+        'question_type': item.type,
+        'quiz_level': item.level,
+        'point': item.point,
+        'question_text': item.text,
+        'image_id': item.imageId || '',
+        'option_A': item.optionA || '',
+        'option_B': item.optionB || '',
+        'option_C': item.optionC || '',
+        'option_D': item.optionD || '',
+        'answer_key': item.answerKey,
+        'solution': item.solution
+      };
+      try {
+        await api.saveItem('Questions', payload, 'stt');
+        successCount++;
+      } catch (err) {
+        console.error("Lỗi khi import dòng câu hỏi:", item, err);
+        failCount++;
+      }
+    }
+
+    setIsQuestionImporting(false);
+    setShowQuestionImportModal(false);
+    setImportedQuestions([]);
+    
+    if (onRefreshData) {
+      onRefreshData();
+    }
+    
+    if (failCount > 0) {
+      alert(`Import hoàn tất! Thành công: ${successCount} câu hỏi, Thất bại: ${failCount} câu hỏi.`);
+    } else {
+      alert(`Import thành công tất cả ${successCount} câu hỏi!`);
     }
   };
 
@@ -258,17 +712,89 @@ const Dashboard: React.FC<DashboardProps> = ({
             <div className="animate-fadeIn">
               {activeTab === 'ROSTER' && (
                 <div className="space-y-6">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h1 className="text-2xl font-black text-gray-800">Bảng điểm danh</h1>
+                      <p className="text-gray-500 text-xs">Theo dõi điểm số và tiến độ học tập của các em học sinh.</p>
+                    </div>
+                  </div>
                   <div className="bg-white p-6 rounded-3xl shadow-sm border grid grid-cols-4 gap-4">
-                    <select value={filterClass} onChange={e => setFilterClass(e.target.value)} className="p-3 bg-gray-50 rounded-xl font-bold text-xs"><option value="ALL">Tất cả lớp</option>{allClasses.map(c => <option key={c} value={c}>Lớp {c}</option>)}</select>
-                    <select value={filterSub} onChange={e => setFilterSub(e.target.value)} className="p-3 bg-gray-50 rounded-xl font-bold text-xs" disabled={isTeacher}><option value="ALL">Tất cả môn</option>{Array.from(new Set(subjects.map(s => s.name))).map(n => <option key={n} value={n}>{n}</option>)}</select>
-                    <select value={filterLes} onChange={e => setFilterLes(e.target.value)} className="p-3 bg-gray-50 rounded-xl font-bold text-xs"><option value="ALL">Tất cả bài</option>{Array.from(new Set(lessons.map(l => l.name))).map(n => <option key={n} value={n}>{n}</option>)}</select>
-                    <select value={filterStat} onChange={e => setFilterStat(e.target.value)} className="p-3 bg-gray-50 rounded-xl font-bold text-xs"><option value="ALL">Trạng thái</option><option value="Pass">Đạt</option><option value="Fail">Fail</option><option value="Chưa thi">Chưa thi</option></select>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pl-1">Lớp học</label>
+                      <select value={filterClass} onChange={e => setFilterClass(e.target.value)} className="w-full p-3 bg-gray-50 rounded-xl font-bold text-xs outline-none"><option value="ALL">Tất cả lớp</option>{allClasses.map(c => <option key={c} value={c}>Lớp {c}</option>)}</select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pl-1">Môn học</label>
+                      <select value={filterSub} onChange={e => setFilterSub(e.target.value)} className="w-full p-3 bg-gray-50 rounded-xl font-bold text-xs outline-none" disabled={isTeacher}><option value="ALL">Tất cả môn</option>{Array.from(new Set(subjects.map(s => s.name))).map(n => <option key={n} value={n}>{n}</option>)}</select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pl-1">Bài luyện tập</label>
+                      <select value={filterLes} onChange={e => setFilterLes(e.target.value)} className="w-full p-3 bg-gray-50 rounded-xl font-bold text-xs outline-none"><option value="ALL">Tất cả bài</option>{Array.from(new Set(lessons.map(l => l.name))).map(n => <option key={n} value={n}>{n}</option>)}</select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block pl-1">Trạng thái</label>
+                      <select value={filterStat} onChange={e => setFilterStat(e.target.value)} className="w-full p-3 bg-gray-50 rounded-xl font-bold text-xs outline-none"><option value="ALL">Tất cả trạng thái</option><option value="Pass">Đạt</option><option value="Fail">Fail</option><option value="Chưa thi">Chưa thi</option></select>
+                    </div>
                   </div>
                   <div className="bg-white rounded-3xl shadow-sm border overflow-hidden">
                     <table className="w-full text-left text-xs">
-                      <thead className="bg-gray-50 border-b"><tr><th className="px-6 py-4">Lớp</th><th className="px-6 py-4">Học sinh</th><th className="px-6 py-4">Bài học</th><th className="px-6 py-4">Điểm</th><th className="px-6 py-4">Trạng thái</th><th className="px-6 py-4 text-center">Chi tiết</th></tr></thead>
+                      <thead className="bg-gray-50 border-b select-none">
+                        <tr>
+                          <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleSort('className')}>
+                            <div className="flex items-center gap-1.5 font-black uppercase text-gray-500 tracking-wider">
+                              Lớp
+                              {sortField === 'className' ? (
+                                <i className={`fas ${sortDirection === 'asc' ? 'fa-sort-up' : 'fa-sort-down'} text-green-600 text-sm`} />
+                              ) : (
+                                <i className="fas fa-sort text-gray-300 hover:text-gray-400" />
+                              )}
+                            </div>
+                          </th>
+                          <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleSort('name')}>
+                            <div className="flex items-center gap-1.5 font-black uppercase text-gray-500 tracking-wider">
+                              Học sinh
+                              {sortField === 'name' ? (
+                                <i className={`fas ${sortDirection === 'asc' ? 'fa-sort-up' : 'fa-sort-down'} text-green-600 text-sm`} />
+                              ) : (
+                                <i className="fas fa-sort text-gray-300 hover:text-gray-400" />
+                              )}
+                            </div>
+                          </th>
+                          <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleSort('lessonName')}>
+                            <div className="flex items-center gap-1.5 font-black uppercase text-gray-500 tracking-wider">
+                              Bài học
+                              {sortField === 'lessonName' ? (
+                                <i className={`fas ${sortDirection === 'asc' ? 'fa-sort-up' : 'fa-sort-down'} text-green-600 text-sm`} />
+                              ) : (
+                                <i className="fas fa-sort text-gray-300 hover:text-gray-400" />
+                              )}
+                            </div>
+                          </th>
+                          <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleSort('score')}>
+                            <div className="flex items-center gap-1.5 font-black uppercase text-gray-500 tracking-wider">
+                              Điểm
+                              {sortField === 'score' ? (
+                                <i className={`fas ${sortDirection === 'asc' ? 'fa-sort-up' : 'fa-sort-down'} text-green-600 text-sm`} />
+                              ) : (
+                                <i className="fas fa-sort text-gray-300 hover:text-gray-400" />
+                              )}
+                            </div>
+                          </th>
+                          <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleSort('status')}>
+                            <div className="flex items-center gap-1.5 font-black uppercase text-gray-500 tracking-wider">
+                              Trạng thái
+                              {sortField === 'status' ? (
+                                <i className={`fas ${sortDirection === 'asc' ? 'fa-sort-up' : 'fa-sort-down'} text-green-600 text-sm`} />
+                              ) : (
+                                <i className="fas fa-sort text-gray-300 hover:text-gray-400" />
+                              )}
+                            </div>
+                          </th>
+                          <th className="px-6 py-4 text-center font-black uppercase text-gray-500 tracking-wider">Chi tiết</th>
+                        </tr>
+                      </thead>
                       <tbody className="divide-y font-bold">
-                        {rosterData.map((item, i) => (
+                        {sortedRosterData.map((item, i) => (
                           <tr key={i} className="hover:bg-gray-50 transition-colors">
                             <td className="px-6 py-4 text-blue-600">{item.className}</td>
                             <td className="px-6 py-4 text-gray-800">{item.name}</td>
@@ -288,7 +814,13 @@ const Dashboard: React.FC<DashboardProps> = ({
 
               {activeTab === 'USERS' && (
                 <div className="space-y-6">
-                  <div className="flex justify-between items-center"><p className="text-gray-500 text-xs">Danh sách tài khoản hệ thống.</p><button onClick={() => setEditingItem({ account: '', name: '', className: '', email: '', role: 'Student', active: 'ON', progress: 'OFF', password: '' })} className="bg-green-600 text-white px-6 py-2 rounded-xl font-bold text-xs">+ Thêm User</button></div>
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h1 className="text-2xl font-black text-gray-800">Danh sách tài khoản</h1>
+                      <p className="text-gray-500 text-xs">Quản lý và cấp quyền các tài khoản người dùng trên hệ thống.</p>
+                    </div>
+                    <button onClick={() => setEditingItem({ account: '', name: '', className: '', email: '', role: 'Student', active: 'ON', progress: 'OFF', password: '' })} className="bg-green-600 text-white px-6 py-2 rounded-xl font-bold text-xs">+ Thêm User</button>
+                  </div>
                   <div className="bg-white rounded-3xl shadow-sm border overflow-hidden">
                     <table className="w-full text-left text-xs">
                       <thead className="bg-gray-50 border-b"><tr><th className="px-6 py-4">Account</th><th className="px-6 py-4">Họ tên</th><th className="px-6 py-4">Lớp</th><th className="px-6 py-4">Role</th><th className="px-6 py-4 text-right">Thao tác</th></tr></thead>
@@ -310,7 +842,13 @@ const Dashboard: React.FC<DashboardProps> = ({
 
               {activeTab === 'SUBJECTS' && (
                 <div className="space-y-6">
-                  <div className="flex justify-between items-center"><p className="text-gray-500 text-xs">Danh mục môn học khối {teacherGrade}.</p>{isAdmin && <button onClick={() => setEditingItem({ stt: subjects.length + 1, name: '', grade: 12 })} className="bg-blue-600 text-white px-6 py-2 rounded-xl font-bold text-xs">+ Thêm Môn học</button>}</div>
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h1 className="text-2xl font-black text-gray-800">Bảng lớp môn</h1>
+                      <p className="text-gray-500 text-xs">Danh mục môn học khối {teacherGrade}.</p>
+                    </div>
+                    {isAdmin && <button onClick={() => setEditingItem({ stt: subjects.length + 1, name: '', grade: 12 })} className="bg-blue-600 text-white px-6 py-2 rounded-xl font-bold text-xs">+ Thêm Môn học</button>}
+                  </div>
                   <div className="bg-white rounded-3xl shadow-sm border overflow-hidden">
                     <table className="w-full text-left text-xs">
                       <thead className="bg-gray-50 border-b"><tr><th className="px-6 py-4">Tên môn học</th><th className="px-6 py-4 text-center">Khối</th>{isAdmin && <th className="px-6 py-4 text-right">Thao tác</th>}</tr></thead>
@@ -326,13 +864,93 @@ const Dashboard: React.FC<DashboardProps> = ({
 
               {activeTab === 'LESSONS' && (
                 <div className="space-y-6">
-                  <div className="flex justify-between items-center"><p className="text-gray-500 text-xs">Quản lý bài học theo môn phụ trách.</p><button onClick={() => setEditingItem({ stt: lessons.length + 1, subjectId: visibleSubjects[0]?.stt || 1, name: '', title: '', timeoutMinutes: 30, count: 10, targetScore: 8 })} className="bg-purple-600 text-white px-6 py-2 rounded-xl font-bold text-xs">+ Thêm Bài học</button></div>
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h1 className="text-2xl font-black text-gray-800">Quản lý bài học</h1>
+                      <p className="text-gray-500 text-xs">Quản lý các bài học và thiết lập chỉ tiêu đạt theo môn học phụ trách.</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="file" 
+                        id="lesson-excel-import" 
+                        onChange={handleImportFile} 
+                        accept=".xlsx,.xls,.csv" 
+                        className="hidden" 
+                      />
+                      <button 
+                        onClick={handleExportExcel} 
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+                        title="Xuất danh sách bài học ra file Excel"
+                      >
+                        <i className="fas fa-file-excel"></i> Export
+                      </button>
+                      <button 
+                        onClick={() => document.getElementById('lesson-excel-import')?.click()} 
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+                        title="Nhập danh sách bài học từ file Excel"
+                      >
+                        <i className="fas fa-file-import"></i> Import
+                      </button>
+                      <button 
+                        onClick={() => setEditingItem({ stt: lessons.length + 1, subjectId: visibleSubjects[0]?.stt || 1, name: '', title: '', timeoutMinutes: 30, count: 10, targetScore: 8 })} 
+                        className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+                      >
+                        + Thêm Bài học
+                      </button>
+                    </div>
+                  </div>
                   <div className="bg-white rounded-3xl shadow-sm border overflow-hidden">
                     <table className="w-full text-left text-xs">
-                      <thead className="bg-gray-50 border-b"><tr><th className="px-6 py-4">Tên bài</th><th className="px-6 py-4">Môn học</th><th className="px-6 py-4">Yêu cầu</th><th className="px-6 py-4 text-right">Thao tác</th></tr></thead>
+                      <thead className="bg-gray-50 border-b select-none">
+                        <tr>
+                          <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleLessonSort('name')}>
+                            <div className="flex items-center gap-1.5 font-black uppercase text-gray-500 tracking-wider">
+                              Tên bài
+                              {lessonSortField === 'name' ? (
+                                <i className={`fas ${lessonSortDirection === 'asc' ? 'fa-sort-up' : 'fa-sort-down'} text-green-600 text-sm`} />
+                              ) : (
+                                <i className="fas fa-sort text-gray-300 hover:text-gray-400" />
+                              )}
+                            </div>
+                          </th>
+                          <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleLessonSort('subjectId')}>
+                            <div className="flex items-center gap-1.5 font-black uppercase text-gray-500 tracking-wider">
+                              Môn học
+                              {lessonSortField === 'subjectId' ? (
+                                <i className={`fas ${lessonSortDirection === 'asc' ? 'fa-sort-up' : 'fa-sort-down'} text-green-600 text-sm`} />
+                              ) : (
+                                <i className="fas fa-sort text-gray-300 hover:text-gray-400" />
+                              )}
+                            </div>
+                          </th>
+                          <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleLessonSort('targetScore')}>
+                            <div className="flex items-center gap-1.5 font-black uppercase text-gray-500 tracking-wider">
+                              Yêu cầu
+                              {lessonSortField === 'targetScore' ? (
+                                <i className={`fas ${lessonSortDirection === 'asc' ? 'fa-sort-up' : 'fa-sort-down'} text-green-600 text-sm`} />
+                              ) : (
+                                <i className="fas fa-sort text-gray-300 hover:text-gray-400" />
+                              )}
+                            </div>
+                          </th>
+                          <th className="px-6 py-4 text-right font-black uppercase text-gray-500 tracking-wider">Thao tác</th>
+                        </tr>
+                      </thead>
                       <tbody className="divide-y font-bold">
-                        {visibleLessons.map(l => (
-                          <tr key={l.stt}><td className="px-6 py-4">{l.name}</td><td className="px-6 py-4">{subjects.find(s=>s.stt===l.subjectId)?.name}</td><td className="px-6 py-4">≥ {l.targetScore}đ / {l.count} câu</td><td className="px-6 py-4 text-right"><button onClick={() => setEditingItem(l)} className="text-blue-500 mr-2"><i className="fas fa-edit"></i></button><button onClick={() => handleDelete('Lessons', l.stt, 'Stt')} className="text-red-500"><i className="fas fa-trash"></i></button></td></tr>
+                        {sortedLessons.map(l => (
+                          <tr key={l.stt} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-6 py-4 text-gray-800">{l.name}</td>
+                            <td className="px-6 py-4 text-blue-600">{subjects.find(s=>s.stt===l.subjectId)?.name}</td>
+                            <td className="px-6 py-4 text-gray-700">≥ {l.targetScore}đ / {l.count} câu</td>
+                            <td className="px-6 py-4 text-right">
+                              <button onClick={() => setEditingItem(l)} className="text-blue-500 hover:text-blue-700 mr-3 transition-colors">
+                                <i className="fas fa-edit"></i>
+                              </button>
+                              <button onClick={() => handleDelete('Lessons', l.stt, 'Stt')} className="text-red-500 hover:text-red-700 transition-colors">
+                                <i className="fas fa-trash"></i>
+                              </button>
+                            </td>
+                          </tr>
                         ))}
                       </tbody>
                     </table>
@@ -342,13 +960,47 @@ const Dashboard: React.FC<DashboardProps> = ({
 
               {activeTab === 'QUESTIONS' && (
                 <div className="space-y-6">
-                  <div className="flex justify-between items-center"><p className="text-gray-500 text-xs">Ngân hàng câu hỏi của bạn.</p><button onClick={() => setEditingItem({ stt: questions.length + 1, lessonId: visibleLessons[0]?.stt || 1, type: 'CHOOSE_ONE', level: 'Thông hiểu', point: 1, text: '', answerKey: '', solution: '' })} className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-bold text-xs">+ Thêm Câu hỏi</button></div>
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h1 className="text-2xl font-black text-gray-800">Ngân hàng câu hỏi</h1>
+                      <p className="text-gray-500 text-xs">Danh sách câu hỏi ôn luyện trong ngân hàng đề thi.</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="file" 
+                        id="question-excel-import" 
+                        onChange={handleImportQuestionsFile} 
+                        accept=".xlsx,.xls,.csv" 
+                        className="hidden" 
+                      />
+                      <button 
+                        onClick={handleExportQuestionsExcel} 
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+                        title="Xuất danh sách câu hỏi ra file Excel"
+                      >
+                        <i className="fas fa-file-excel"></i> Export
+                      </button>
+                      <button 
+                        onClick={() => document.getElementById('question-excel-import')?.click()} 
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+                        title="Nhập danh sách câu hỏi từ file Excel"
+                      >
+                        <i className="fas fa-file-import"></i> Import
+                      </button>
+                      <button 
+                        onClick={() => setEditingItem({ stt: questions.length + 1, lessonId: visibleLessons[0]?.stt || 1, type: 'CHOOSE_ONE', level: 'EASY', point: 1, text: '', answerKey: '', solution: '' })} 
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+                      >
+                        + Thêm Câu hỏi
+                      </button>
+                    </div>
+                  </div>
                   <div className="bg-white rounded-3xl shadow-sm border overflow-hidden">
                     <table className="w-full text-left text-xs">
                       <thead className="bg-gray-50 border-b"><tr><th className="px-6 py-4">Câu hỏi</th><th className="px-6 py-4">Bài học</th><th className="px-6 py-4">Loại</th><th className="px-6 py-4 text-right">Thao tác</th></tr></thead>
                       <tbody className="divide-y font-bold">
                         {visibleQuestions.slice(0, 50).map(q => (
-                          <tr key={q.stt}><td className="px-6 py-4 truncate max-w-xs">{q.text}</td><td className="px-6 py-4">{lessons.find(l=>l.stt===q.lessonId)?.name}</td><td className="px-6 py-4 text-[10px]">{q.type}</td><td className="px-6 py-4 text-right"><button onClick={() => setEditingItem(q)} className="text-blue-500 mr-2"><i className="fas fa-edit"></i></button><button onClick={() => handleDelete('Questions', q.stt, 'stt')} className="text-red-500"><i className="fas fa-trash"></i></button></td></tr>
+                          <tr key={q.stt}><td className="px-6 py-4 truncate max-w-xs">{formatTextWithMath(q.text)}</td><td className="px-6 py-4">{lessons.find(l=>l.stt===q.lessonId)?.name}</td><td className="px-6 py-4 text-[10px]">{q.type}</td><td className="px-6 py-4 text-right"><button onClick={() => setEditingItem(q)} className="text-blue-500 mr-2"><i className="fas fa-edit"></i></button><button onClick={() => handleDelete('Questions', q.stt, 'stt')} className="text-red-500"><i className="fas fa-trash"></i></button></td></tr>
                         ))}
                       </tbody>
                     </table>
@@ -391,7 +1043,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               <div className="grid grid-cols-2 gap-4 mb-6">
                 <div className="col-span-2 space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase">Bài học</label><select value={editingItem.lessonId} onChange={e=>setEditingItem({...editingItem, lessonId: parseInt(e.target.value)})} className="w-full p-3 bg-gray-50 border rounded-xl font-bold">{visibleLessons.map(l=><option key={l.stt} value={l.stt}>{l.name}</option>)}</select></div>
                 <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase">Loại câu hỏi</label><select value={editingItem.type} onChange={e=>setEditingItem({...editingItem, type: e.target.value})} className="w-full p-3 bg-gray-50 border rounded-xl font-bold"><option value="CHOOSE_ONE">Chọn một</option><option value="CHOOSE_MULTIPLE">Chọn nhiều</option><option value="TRUE_FALSE">Đúng / Sai</option><option value="SHORT_ANSWER">Tự luận</option></select></div>
-                <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase">Mức độ</label><select value={editingItem.level} onChange={e=>setEditingItem({...editingItem, level: e.target.value})} className="w-full p-3 bg-gray-50 border rounded-xl font-bold"><option value="Nhận biết">Nhận biết</option><option value="Thông hiểu">Thông hiểu</option><option value="Vận dụng">Vận dụng</option><option value="VD Cao">VD Cao</option></select></div>
+                <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase">Mức độ</label><select value={editingItem.level} onChange={e=>setEditingItem({...editingItem, level: e.target.value})} className="w-full p-3 bg-gray-50 border rounded-xl font-bold"><option value="EASY">EASY</option><option value="MEDIUM">MEDIUM</option><option value="HARD">HARD</option></select></div>
                 <div className="col-span-2 space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase">Nội dung câu hỏi</label><textarea value={editingItem.text} onChange={e=>setEditingItem({...editingItem, text: e.target.value})} className="w-full p-3 bg-gray-50 border rounded-xl font-bold h-20" /></div>
                 <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase">Option A</label><input value={editingItem.optionA} onChange={e=>setEditingItem({...editingItem, optionA: e.target.value})} className="w-full p-2 bg-gray-50 border rounded-lg text-xs" /></div>
                 <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase">Option B</label><input value={editingItem.optionB} onChange={e=>setEditingItem({...editingItem, optionB: e.target.value})} className="w-full p-2 bg-gray-50 border rounded-lg text-xs" /></div>
@@ -544,11 +1196,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                     const isAnswered = studentAnswer.length > 0;
 
                     return (
-                      <div key={question.stt} className="bg-white border rounded-2xl p-4 space-y-3">
+                      <div key={`${question.stt}-${idx}`} className="bg-white border rounded-2xl p-4 space-y-3">
                         <div className="flex justify-between items-start gap-4">
                           <div className="flex-1">
                             <p className="text-[10px] font-black text-gray-400 uppercase mb-2">Câu {idx + 1}</p>
-                            <p className="font-bold text-gray-800 mb-3">{question.text || 'Không xác định'}</p>
+                            <p className="font-bold text-gray-800 mb-3"><RenderLatex content={question.text || 'Không xác định'} /></p>
                             
                             {question.type === 'CHOOSE_ONE' || question.type === 'TRUE_FALSE' ? (
                               <div className="grid grid-cols-2 gap-2 mb-3">
@@ -559,7 +1211,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                                   const isSelected = studentAnswer.toUpperCase().includes(optionChar.toUpperCase());
                                   return (
                                     <div key={option} className={`p-2 rounded-lg border-2 text-xs font-bold ${isSelected ? 'bg-blue-100 border-blue-400' : 'bg-gray-50 border-gray-200'}`}>
-                                      <span className="font-black">{optionChar}.</span> {optionText}
+                                      <span className="font-black">{optionChar}.</span> <RenderLatex content={optionText || ''} />
                                     </div>
                                   );
                                 })}
@@ -572,7 +1224,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                                   const isSelected = studentAnswer.toUpperCase().includes(option);
                                   return (
                                     <div key={option} className={`p-2 rounded-lg border-2 text-xs font-bold ${isSelected ? 'bg-blue-100 border-blue-400' : 'bg-gray-50 border-gray-200'}`}>
-                                      <span className="font-black">{option}.</span> {optionText}
+                                      <span className="font-black">{option}.</span> <RenderLatex content={optionText || ''} />
                                     </div>
                                   );
                                 })}
@@ -609,7 +1261,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                         {question.solution && (
                           <div className="bg-amber-50 border-l-4 border-amber-400 p-3 rounded text-xs">
                             <p className="font-black text-amber-700 uppercase mb-1">Giải thích:</p>
-                            <p className="text-amber-900">{question.solution}</p>
+                            <p className="text-amber-900"><RenderLatex content={question.solution} /></p>
                           </div>
                         )}
                       </div>
@@ -625,6 +1277,162 @@ const Dashboard: React.FC<DashboardProps> = ({
             <div className="mt-6">
               <button onClick={() => setDetailResult(null)} className="w-full py-4 bg-gray-100 text-gray-600 rounded-2xl font-black uppercase tracking-widest hover:bg-gray-200 transition-all">
                 Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showImportModal && (
+        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-4xl p-10 overflow-y-auto max-h-[90vh]">
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <h3 className="text-xl font-black mb-2 uppercase">Xem trước danh sách bài học Import</h3>
+                <p className="text-sm text-gray-500">Phát hiện {importedLessons.length} bài học từ file Excel. Hãy kiểm tra kỹ trước khi bấm xác nhận lưu.</p>
+              </div>
+              <button onClick={() => setShowImportModal(false)} className="text-gray-400 hover:text-gray-600 text-2xl" disabled={isImporting}>
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-6">
+              <p className="text-xs text-blue-800 font-bold">
+                💡 <strong>Chú ý:</strong> Nếu số thứ tự (STT) trùng khớp với bài học đã tồn tại, hệ thống sẽ tự động cập nhật bài học đó. Nếu số thứ tự mới, hệ thống sẽ thêm mới.
+              </p>
+            </div>
+
+            <div className="border rounded-2xl overflow-hidden max-h-[50vh] overflow-y-auto mb-6">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-gray-50 border-b select-none">
+                  <tr>
+                    <th className="px-4 py-3 font-black text-gray-500 uppercase tracking-wider">STT</th>
+                    <th className="px-4 py-3 font-black text-gray-500 uppercase tracking-wider">Tên bài</th>
+                    <th className="px-4 py-3 font-black text-gray-500 uppercase tracking-wider">Tiêu đề / Mô tả</th>
+                    <th className="px-4 py-3 font-black text-gray-500 uppercase tracking-wider">Môn học ID</th>
+                    <th className="px-4 py-3 font-black text-gray-500 uppercase tracking-wider text-center">Thời gian</th>
+                    <th className="px-4 py-3 font-black text-gray-500 uppercase tracking-wider text-center">Số câu</th>
+                    <th className="px-4 py-3 font-black text-gray-500 uppercase tracking-wider text-center">Điểm tối thiểu</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y font-bold">
+                  {importedLessons.map((l, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-gray-600">{l.stt}</td>
+                      <td className="px-4 py-3 text-gray-800">{l.name}</td>
+                      <td className="px-4 py-3 text-gray-500 truncate max-w-xs">{l.title || '--'}</td>
+                      <td className="px-4 py-3 text-blue-600">
+                        ID: {l.subjectId} ({subjects.find(s => s.stt === l.subjectId)?.name || 'Không tìm thấy'})
+                      </td>
+                      <td className="px-4 py-3 text-center text-gray-800">{l.timeoutMinutes} phút</td>
+                      <td className="px-4 py-3 text-center text-gray-800">{l.count}</td>
+                      <td className="px-4 py-3 text-center text-green-600">≥ {l.targetScore}đ</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex gap-4">
+              <button
+                onClick={() => setShowImportModal(false)}
+                className="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-black uppercase tracking-widest hover:bg-gray-200 transition-all"
+                disabled={isImporting}
+              >
+                Hủy bỏ
+              </button>
+              <button
+                onClick={handleConfirmImport}
+                className="flex-1 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                disabled={isImporting}
+              >
+                {isImporting ? (
+                  <>
+                    <i className="fas fa-spinner animate-spin"></i> Đang lưu ({importedLessons.length} dòng)...
+                  </>
+                ) : (
+                  <>
+                    <i className="fas fa-check"></i> Xác nhận Import
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showQuestionImportModal && (
+        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-5xl p-10 overflow-y-auto max-h-[90vh]">
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <h3 className="text-xl font-black mb-2 uppercase">Xem trước danh sách Câu hỏi Import</h3>
+                <p className="text-sm text-gray-500">Phát hiện {importedQuestions.length} câu hỏi từ file Excel. Hãy kiểm tra kỹ trước khi bấm xác nhận lưu.</p>
+              </div>
+              <button onClick={() => setShowQuestionImportModal(false)} className="text-gray-400 hover:text-gray-600 text-2xl" disabled={isQuestionImporting}>
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-6">
+              <p className="text-xs text-blue-800 font-bold">
+                💡 <strong>Chú ý:</strong> Nếu số thứ tự (STT) trùng khớp với câu hỏi đã tồn tại, hệ thống sẽ tự động cập nhật câu hỏi đó. Nếu số thứ tự mới, hệ thống sẽ thêm mới.
+              </p>
+            </div>
+
+            <div className="border rounded-2xl overflow-hidden max-h-[50vh] overflow-y-auto mb-6">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-gray-50 border-b select-none">
+                  <tr>
+                    <th className="px-4 py-3 font-black text-gray-500 uppercase tracking-wider">STT</th>
+                    <th className="px-4 py-3 font-black text-gray-500 uppercase tracking-wider">Nội dung câu hỏi</th>
+                    <th className="px-4 py-3 font-black text-gray-500 uppercase tracking-wider">Bài học</th>
+                    <th className="px-4 py-3 font-black text-gray-500 uppercase tracking-wider text-center">Loại</th>
+                    <th className="px-4 py-3 font-black text-gray-500 uppercase tracking-wider text-center">Mức độ</th>
+                    <th className="px-4 py-3 font-black text-gray-500 uppercase tracking-wider text-center">Điểm</th>
+                    <th className="px-4 py-3 font-black text-gray-500 uppercase tracking-wider">Đáp án</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y font-bold">
+                  {importedQuestions.map((q, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-gray-600">{q.stt}</td>
+                      <td className="px-4 py-3 text-gray-800 truncate max-w-xs">{q.text}</td>
+                      <td className="px-4 py-3 text-blue-600">
+                        ID: {q.lessonId} ({lessons.find(l => l.stt === q.lessonId)?.name || 'Không tìm thấy'})
+                      </td>
+                      <td className="px-4 py-3 text-center text-gray-800">{q.type}</td>
+                      <td className="px-4 py-3 text-center text-gray-800">{q.level}</td>
+                      <td className="px-4 py-3 text-center text-gray-800">{q.point}</td>
+                      <td className="px-4 py-3 text-green-600">{q.answerKey}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex gap-4">
+              <button
+                onClick={() => setShowQuestionImportModal(false)}
+                className="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-black uppercase tracking-widest hover:bg-gray-200 transition-all"
+                disabled={isQuestionImporting}
+              >
+                Hủy bỏ
+              </button>
+              <button
+                onClick={handleConfirmQuestionsImport}
+                className="flex-1 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                disabled={isQuestionImporting}
+              >
+                {isQuestionImporting ? (
+                  <>
+                    <i className="fas fa-spinner animate-spin"></i> Đang lưu ({importedQuestions.length} dòng)...
+                  </>
+                ) : (
+                  <>
+                    <i className="fas fa-check"></i> Xác nhận Import
+                  </>
+                )}
               </button>
             </div>
           </div>

@@ -8,9 +8,10 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        allowedHosts: 'all',
       },
       plugins: [react()],
-      base: '/edupulse/', //set base path for gh-pages deployment build to github pages
+      base: '/', // Adjusted for AI Studio preview environment root path
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)

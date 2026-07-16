@@ -21,11 +21,17 @@ const Analytics: React.FC<AnalyticsProps> = ({ currentUser, results, subjects, l
     return match ? parseInt(match[0]) : 0;
   };
 
+  const isGradeLevel = (className: string) => {
+    const cleaned = className.replace(/(Khối|khối|Grade|grade|Lớp|lớp|Class|class)/gi, '').trim();
+    const num = parseInt(cleaned);
+    return !isNaN(num) && cleaned === num.toString();
+  };
+
   // 1. Lọc dữ liệu thô ban đầu (Data Scope)
   const studentResults = useMemo(() => {
     const teacherClass = currentUser.className?.trim() || '';
     const teacherGradeNum = extractGradeNumber(teacherClass);
-    const isSpecificClass = teacherClass !== teacherGradeNum.toString() && teacherClass !== '';
+    const isSpecificClass = teacherClass !== '' && !isGradeLevel(teacherClass);
 
     return results.filter(r => {
       const role = (r.role || 'Student').toLowerCase();
@@ -70,7 +76,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ currentUser, results, subjects, l
   const availableSubClasses = useMemo(() => {
     const teacherClass = currentUser.className?.trim() || '';
     const teacherGradeNumStr = extractGradeNumber(teacherClass).toString();
-    const isSpecificClass = teacherClass !== teacherGradeNumStr && teacherClass !== '';
+    const isSpecificClass = teacherClass !== '' && !isGradeLevel(teacherClass);
 
     let sourceList = (allClasses && allClasses.length > 0) 
       ? allClasses 

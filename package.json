@@ -12,8 +12,10 @@
   },
   "dependencies": {
     "katex": "^0.16.32",
+    "mathjs": "^15.2.0",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3"
+    "react-dom": "^19.2.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

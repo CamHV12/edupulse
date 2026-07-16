@@ -1,54 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import katex from 'katex';
-import 'katex/dist/katex.min.css';
 import { Lesson, Question } from '../types';
-
-// Render mixed content containing plain text and LaTeX segments.
-// Supports inline `$...$`, display `$$...$$`, `\(...\)` and `\[...\]`.
-function RenderLatex({ content }: { content?: string | null }) {
-  if (!content) return <span />;
-  const s = String(content);
-
-  // If the content already contains HTML tags and no LaTeX delimiters, render as-is.
-  if (s.includes('<') && !s.includes('$') && !s.includes('\\(') && !s.includes('\\[')) {
-    return <span dangerouslySetInnerHTML={{ __html: s }} />;
-  }
-
-  const escapeHtml = (raw: string) => raw
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>');
-
-  const parts = s.split(/(\$\$[\s\S]+?\$\$|\$[\s\S]+?\$|\\\\\([\s\S]+?\\\\\)|\\\\\[[\s\S]+?\\\\\])/g);
-  const html = parts.map((part) => {
-    if (!part) return '';
-    // $$...$$
-    if (/^\$\$[\s\S]+\$\$$/.test(part)) {
-      const inner = part.slice(2, -2);
-      try { return katex.renderToString(inner, { throwOnError: false, displayMode: true }); } catch { return escapeHtml(part); }
-    }
-    // $...$
-    if (/^\$[\s\S]+\$$/.test(part)) {
-      const inner = part.slice(1, -1);
-      try { return katex.renderToString(inner, { throwOnError: false, displayMode: false }); } catch { return escapeHtml(part); }
-    }
-    // \(...\)
-    if (/^\\\\\([\s\S]+\\\\\)$/.test(part)) {
-      const inner = part.slice(2, -2);
-      try { return katex.renderToString(inner, { throwOnError: false, displayMode: false }); } catch { return escapeHtml(part); }
-    }
-    // \[...\]
-    if (/^\\\\\[[\s\S]+\\\\\]$/.test(part)) {
-      const inner = part.slice(2, -2);
-      try { return katex.renderToString(inner, { throwOnError: false, displayMode: true }); } catch { return escapeHtml(part); }
-    }
-    return escapeHtml(part);
-  }).join('');
-
-  return <span dangerouslySetInnerHTML={{ __html: html }} />;
-}
+import RenderLatex from './RenderLatex';
 
 interface QuizProps {
   lesson: Lesson;
@@ -374,7 +327,7 @@ const Quiz: React.FC<QuizProps> = ({ lesson, questions, onFinish, onCancel }) =>
         <div className="hidden sm:flex gap-1 overflow-x-auto max-w-[50%] scrollbar-hide">
           {questions.map((q, idx) => (
             <button
-              key={q.stt}
+              key={`${q.stt}-${idx}`}
               onClick={() => !isSubmitting && setCurrentIdx(idx)}
               className={`w-8 h-8 rounded-lg text-xs font-bold shrink-0 transition-all ${
                 currentIdx === idx ? 'bg-blue-600 text-white shadow-md' : answers[q.stt] ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'
