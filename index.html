@@ -6,6 +6,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>EduPulse - Nhịp đập của giáo dục hiện đại</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Microsoft Teams JavaScript SDK: required for Teams personal tabs -->
+    <script src="https://res.cdn.office.net/teams-js/2.34.0/js/MicrosoftTeams.min.js"></script>
+    <script>
+        // Initialize the Teams SDK when EduPulse is hosted inside a Teams iframe.
+        // The public website remains usable in a normal browser without Teams.
+        if (window.self !== window.top && window.microsoftTeams?.app) {
+            window.microsoftTeams.app.initialize().catch((error) => {
+                console.error('EduPulse Teams SDK initialization failed:', error);
+            });
+        }
+    </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Thêm thư viện Confetti -->
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
