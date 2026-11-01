@@ -1,0 +1,40 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.16",
+  "version": "1.0.0",
+  "id": "6f9a8d6e-4d6c-4e27-9a15-2e5c7d1a8f30",
+  "packageName": "com.camhv12.edupulse",
+  "developer": {
+    "name": "CamHV12",
+    "websiteUrl": "https://camhv12.github.io/edupulse/",
+    "privacyUrl": "https://camhv12.github.io/edupulse/",
+    "termsOfUseUrl": "https://camhv12.github.io/edupulse/"
+  },
+  "name": {
+    "short": "EduPulse",
+    "full": "EduPulse - Nhịp đập của giáo dục hiện đại"
+  },
+  "description": {
+    "short": "Không gian học tập tương tác EduPulse ngay trong Microsoft Teams.",
+    "full": "EduPulse là ứng dụng học tập tương tác, cung cấp bài học và hoạt động ôn tập theo chương trình giáo dục mới. Ứng dụng mở trực tiếp trong Microsoft Teams dưới dạng Personal Tab."
+  },
+  "icons": {
+    "color": "icon-color.png",
+    "outline": "icon-outline.png"
+  },
+  "accentColor": "#109164",
+  "staticTabs": [
+    {
+      "entityId": "edupulse-home",
+      "name": "EduPulse",
+      "contentUrl": "https://camhv12.github.io/edupulse/",
+      "websiteUrl": "https://camhv12.github.io/edupulse/",
+      "scopes": [
+        "personal"
+      ]
+    }
+  ],
+  "validDomains": [
+    "camhv12.github.io"
+  ]
+}
