@@ -18,3 +18,10 @@ View your app in AI Studio: https://ai.studio/apps/drive/15cMn8Xs_93oUxFfLQRJcOo
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Deploy to GitHub Pages
+
+The `Deploy to GitHub Pages` workflow builds the app and deploys it when changes
+are pushed to `main`. In the repository settings, go to **Pages** and set the
+publishing source to **GitHub Actions**. The workflow builds with the
+`/edupulse/` base path used by this project page.
